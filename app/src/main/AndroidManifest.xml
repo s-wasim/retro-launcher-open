@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Required on API 30+. Without this, queryIntentActivities() returns an
+         empty list and the launcher silently shows no apps. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- The clock widget's tap regions and the search overlay's web row.
+             Declaring them keeps resolveActivity() and getLaunchIntentForPackage()
+             honest on API 30+, so the fallback chains in Launch can tell "no such
+             app" apart from "the app is hidden from us". -->
+        <intent>
+            <action android:name="android.intent.action.SHOW_ALARMS" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_CALENDAR" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.WEB_SEARCH" />
+        </intent>
+        <!-- The drawer's quick-action box. Package visibility was not the
+             cause of the dead uninstall row (App Info resolved fine, so
+             filtering was not biting), but declaring these keeps the
+             fallback chain in AppActions honest on API 30+ — without them a
+             device that really has no installer would be indistinguishable
+             from one that is merely hiding it from us. -->
+        <intent>
+            <action android:name="android.intent.action.DELETE" />
+            <data android:scheme="package" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.UNINSTALL_PACKAGE" />
+            <data android:scheme="package" />
+        </intent>
+        <!-- ClockWidget.WEATHER_PACKAGES. On API 30+ an undeclared package is
+             invisible, so getLaunchIntentForPackage returned null for every
+             one of these and tapping the weather line could never open a
+             weather app — the tap was not broken, the visibility was. -->
+        <package android:name="com.google.android.apps.weather" />
+        <package android:name="com.sec.android.daemonapp" />
+        <package android:name="com.samsung.android.weather" />
+        <package android:name="com.miui.weather2" />
+        <package android:name="com.huawei.android.totemweather" />
+        <package android:name="com.coloros.weather2" />
+        <package android:name="com.oneplus.weather" />
+        <package android:name="com.weather.Weather" />
+        <package android:name="com.accuweather.android" />
+    </queries>
+
+    <!-- Home-screen lock needs no uses-permission: it goes through the
+         accessibility service below, or through Shizuku. V9 §10 dropped
+         SYSTEM_ALERT_WINDOW from this list — it was declared for an overlay
+         lock route that Shizuku superseded and that was never built, so there
+         is no TYPE_APPLICATION_OVERLAY anywhere in the source and the
+         permission bought a "display over other apps" trust prompt for
+         nothing. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- The weather fetch already sends exact coordinates; with only COARSE
+         the platform hands us a fix rounded to roughly a city block, and the
+         app never asks a provider for one at all. FINE plus
+         LocationSource.requestFresh is what makes the reading local. Both
+         are declared because the user may grant only approximate location,
+         and that must still work. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- Swipe-down-from-status-bar-inset: normal protection, no runtime
+         prompt. Undocumented reflection call, silent no-op if unavailable. -->
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+
+    <!-- The drawer's UNINSTALL row. Required since API 8.0 to drive the
+         package-uninstall flow, and minSdk here is exactly 26. Also normal
+         protection: granted at install, no runtime prompt. Without it
+         startActivity(ACTION_DELETE) still succeeds — the system installer
+         resolves, starts, finds no permission on the caller and finishes
+         before drawing — which is precisely why the row appeared to do
+         nothing at all rather than fail. See DESIGN_NOTES §9 delta 26. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+    <!-- enableOnBackInvokedCallback: from targetSdk 36 the platform stops
+         calling Activity#onBackPressed, so the callback HomeActivity
+         registers is the only thing keeping Back from closing the launcher.
+         Opting in explicitly rather than relying on the target-level default
+         keeps that legible. -->
+    <application
+        android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/AppTheme">
+
+        <!-- screenOrientation is kept, but it is a request, not a guarantee:
+             API 36 ignores it on displays 600dp and wider. The layout is
+             sized in cqw off the screen's own width, so it adapts.
+
+             configChanges deliberately lists only the changes that cannot
+             alter the layout's dimensions. Every size-affecting one —
+             orientation, screenSize, screenLayout, density, fontScale — is
+             left off so the activity recreates: Metrics is built once from
+             displayMetrics in onCreate and every padding, text size and icon
+             in the app is a fixed pixel value derived from it at construction
+             time, so a resize has to rebuild the view tree, and recreation is
+             the cheapest correct way to do that. Recreation is safe here by
+             construction — stateNotNeeded, no saved state read, the launcher
+             always reopens on home, and the receiver is registered in
+             onCreate against onDestroy. -->
+        <activity
+            android:name=".HomeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait"
+            android:configChanges="uiMode|keyboardHidden|navigation">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Opt-in, and the route for two gestures: swipe-down-opens-the-shade
+             and double-tap-locks-the-screen (V9 §8 moved the lock off the long
+             press). Off until the user enables it in Accessibility settings;
+             the shade swipe is a silent no-op until then, and since V9 §10
+             removed the device admin the lock has no fallback beneath this
+             one but Shizuku. Reads nothing — see ShadeService's javadoc and
+             DESIGN_NOTES §9 deltas 21 and 25. android:permission is what makes
+             this an accessibility service; only the system can bind it. -->
+        <service
+            android:name=".shade.ShadeService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/shade_service" />
+        </service>
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+    </application>
+
+</manifest>
